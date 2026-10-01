@@ -142,8 +142,7 @@ export function revealCompletedBoundariesWithViewTransitions(
     const existingTransition = document['__reactViewTransition'];
     if (existingTransition) {
       // Retry after the previous ViewTransition finishes.
-      const retry = window['$RV'].bind(null, batch);
-      existingTransition.finished.then(retry, retry);
+      existingTransition.finished.finally(window['$RV'].bind(null, batch));
       return;
     }
     // First collect all entering names that might form pairs exiting names.
@@ -343,33 +342,30 @@ export function revealCompletedBoundariesWithViewTransitions(
         },
         types: [], // TODO: Add a hard coded type for Suspense reveals.
       }));
-      const restoreViewTransitionNames = () => {
-        // Restore all the names/classes that we applied to what they were before.
-        // We do it in reverse order in case there were duplicates so the first one wins.
-        for (let i = restoreQueue.length - 3; i >= 0; i -= 3) {
-          const element = restoreQueue[i];
-          const elementStyle = element.style;
-          const previousName = restoreQueue[i + 1];
-          elementStyle['viewTransitionName'] = previousName;
-          const previousClassName = restoreQueue[i + 1];
-          elementStyle['viewTransitionClass'] = previousClassName;
-          if (element.getAttribute('style') === '') {
-            element.removeAttribute('style');
+      // `ready` rejects when the browser skips the transition, e.g. because the
+      // document is hidden. Catch so it isn't reported as an unhandled rejection.
+      transition.ready
+        .finally(() => {
+          // Restore all the names/classes that we applied to what they were before.
+          // We do it in reverse order in case there were duplicates so the first one wins.
+          for (let i = restoreQueue.length - 3; i >= 0; i -= 3) {
+            const element = restoreQueue[i];
+            const elementStyle = element.style;
+            const previousName = restoreQueue[i + 1];
+            elementStyle['viewTransitionName'] = previousName;
+            const previousClassName = restoreQueue[i + 1];
+            elementStyle['viewTransitionClass'] = previousClassName;
+            if (element.getAttribute('style') === '') {
+              element.removeAttribute('style');
+            }
           }
-        }
-      };
-      const clearViewTransition = () => {
+        })
+        .catch(() => {});
+      transition.finished.finally(() => {
         if (document['__reactViewTransition'] === transition) {
           document['__reactViewTransition'] = null;
         }
-      };
-      // `ready` rejects when the browser skips the transition, e.g. because the
-      // document is hidden. Handle rejections so they aren't reported as unhandled.
-      transition.ready.then(
-        restoreViewTransitionNames,
-        restoreViewTransitionNames,
-      );
-      transition.finished.then(clearViewTransition, clearViewTransition);
+      });
       // Queue any future completions into its own batch since they won't have been
       // snapshotted by this one.
       window['$RB'] = [];
